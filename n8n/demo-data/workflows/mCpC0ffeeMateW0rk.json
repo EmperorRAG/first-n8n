@@ -1,0 +1,113 @@
+{
+	"id": "mCpC0ffeeMateW0rk",
+	"name": "Coffee MCP Agent",
+	"active": false,
+	"nodes": [
+		{
+			"parameters": {
+				"options": {
+					"systemMessage": "You are a helpful coffee assistant. Use the available tools to look up coffee information when users ask about coffees. Always use the tools rather than guessing."
+				}
+			},
+			"id": "agent-node-001",
+			"name": "AI Agent",
+			"type": "@n8n/n8n-nodes-langchain.agent",
+			"typeVersion": 1.7,
+			"position": [
+				880,
+				340
+			]
+		},
+		{
+			"parameters": {},
+			"id": "chat-trigger-001",
+			"name": "When chat message received",
+			"type": "@n8n/n8n-nodes-langchain.chatTrigger",
+			"typeVersion": 1.1,
+			"position": [
+				660,
+				340
+			],
+			"webhookId": "coffee-mcp-chat-trigger"
+		},
+		{
+			"parameters": {
+				"model": "llama3.2:latest",
+				"options": {}
+			},
+			"id": "ollama-model-001",
+			"name": "Ollama Chat Model",
+			"type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+			"typeVersion": 1,
+			"position": [
+				820,
+				560
+			],
+			"credentials": {
+				"ollamaApi": {
+					"id": "xHuYe0MDGOs9IpBW",
+					"name": "Local Ollama service"
+				}
+			}
+		},
+		{
+			"parameters": {
+				"sseEndpoint": "http://coffee-mate-mcp:3001/sse"
+			},
+			"id": "mcp-client-tool-001",
+			"name": "MCP Client Tool",
+			"type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+			"typeVersion": 1,
+			"position": [
+				1020,
+				560
+			]
+		}
+	],
+	"connections": {
+		"When chat message received": {
+			"main": [
+				[
+					{
+						"node": "AI Agent",
+						"type": "main",
+						"index": 0
+					}
+				]
+			]
+		},
+		"Ollama Chat Model": {
+			"ai_languageModel": [
+				[
+					{
+						"node": "AI Agent",
+						"type": "ai_languageModel",
+						"index": 0
+					}
+				]
+			]
+		},
+		"MCP Client Tool": {
+			"ai_tool": [
+				[
+					{
+						"node": "AI Agent",
+						"type": "ai_tool",
+						"index": 0
+					}
+				]
+			]
+		}
+	},
+	"settings": {
+		"executionOrder": "v1"
+	},
+	"staticData": null,
+	"meta": {
+		"templateCredsSetupCompleted": true
+	},
+	"pinData": {},
+	"versionId": "coffee-mcp-v1",
+	"triggerCount": 0,
+	"tags": []
+}
