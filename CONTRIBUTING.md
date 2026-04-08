@@ -53,6 +53,7 @@ dependencies should be minimal and optional.
 ### Essential Configuration
 
 This includes:
+
 - Pre-configured environment variables with sensible defaults
 - Basic Docker Compose profiles for different hardware (CPU, GPU-Nvidia, GPU-AMD)
 - Minimal volume mounts for data persistence
@@ -61,6 +62,7 @@ This includes:
 ### Getting Started Materials
 
 This includes:
+
 - Clear installation instructions for different platforms
 - A demo workflow showcasing AI capabilities
 - Basic documentation for accessing local files
@@ -71,6 +73,7 @@ This includes:
 ### Production Infrastructure
 
 Including:
+
 - Reverse proxies
 - SSL/TLS termination
 - Load balancers
@@ -81,6 +84,7 @@ Including:
 ### Advanced Networking
 
 Including:
+
 - Custom network configurations
 - VPN integrations
 - Multiple environment setups
@@ -89,6 +93,7 @@ Including:
 ### Alternative Technology Stacks
 
 Including:
+
 - Different vector databases
 - Alternative workflow platforms
 - Multiple LLM backends beyond Ollama
@@ -97,6 +102,7 @@ Including:
 ### Enterprise Features
 
 Including:
+
 - Authentication systems
 - Multi-tenancy
 - Advanced access controls
@@ -108,7 +114,6 @@ Including:
   - Focus on a single feature or fix per PR.
 - Typo-Only PRs:
   - Typos are not sufficient justification for a PR and will be rejected.
-
 
 Remember: **It's better to be an excellent starting point than a mediocre
 everything-solution.**

@@ -4,7 +4,7 @@ A local AI and workflow automation environment with MCP (Model Context Protocol)
 
 This stack extends the original starter kit with a dockerized MCP server ([coffee-mate](../first-mcp)), demonstrating how n8n can use MCP tools via an AI Agent workflow.
 
-### What's included
+## What's included
 
 ✅ [**Self-hosted n8n**](https://n8n.io/) - Low-code platform with over 400
 integrations and advanced AI components
