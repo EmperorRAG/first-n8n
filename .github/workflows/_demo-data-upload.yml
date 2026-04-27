@@ -93,6 +93,7 @@ jobs:
             --source "${{ inputs.source-path }}" \
             --pattern "${{ inputs.pattern }}" \
             --auth-mode login \
+            --enable-file-backup-request-intent \
             --output table
 
       - name: List share contents
@@ -102,4 +103,5 @@ jobs:
             --account-name "${{ inputs.storage-account }}" \
             --share-name "${{ inputs.share-name }}" \
             --auth-mode login \
+            --enable-file-backup-request-intent \
             --output table
