@@ -54,6 +54,15 @@ param ollamaAppName string = 'ca-ollama-01-dev'
 @description('Name of the Qdrant Container App.')
 param qdrantAppName string = 'ca-qdrant-01-dev'
 
+@description('Name of the n8n import Container App job.')
+param n8nImportJobName string = 'caj-n8n-import-01-dev'
+
+@description('Name of the Ollama model-pull Container App job.')
+param ollamaPullJobName string = 'caj-ollama-pull-01-dev'
+
+@description('Ollama model name to pull (Ollama registry tag).')
+param ollamaModelName string = 'llama3.2'
+
 // ----- Existing references ----------------------------------------------
 
 resource deployId 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
@@ -163,6 +172,42 @@ module n8nApp 'modules/n8n-app.bicep' = {
   ]
 }
 
+// ----- Phase 5 modules (jobs) -------------------------------------------
+
+module n8nImportJob 'modules/n8n-import-job.bicep' = {
+  name: 'n8n-import-job'
+  params: {
+    name: n8nImportJobName
+    location: location
+    tags: tags
+    environmentId: cae.id
+    runtimeIdentityResourceId: runtimeIdentityResourceId
+    keyVaultUri: kv.properties.vaultUri
+    postgresFqdn: postgres.outputs.fqdn
+    postgresDatabase: postgres.outputs.databaseName
+    postgresUser: postgres.outputs.adminLogin
+  }
+  dependsOn: [
+    caeStorage
+    secretsBootstrap
+  ]
+}
+
+module ollamaPullJob 'modules/ollama-pull-job.bicep' = {
+  name: 'ollama-pull-job'
+  params: {
+    name: ollamaPullJobName
+    location: location
+    tags: tags
+    environmentId: cae.id
+    ollamaHost: '${ollamaAppName}:11434'
+    modelName: ollamaModelName
+  }
+  dependsOn: [
+    ollamaApp
+  ]
+}
+
 // ----- Outputs -----------------------------------------------------------
 
 output storageAccountId string = storage.outputs.storageAccountId
@@ -177,3 +222,5 @@ output caeStorageNames string[] = caeStorage.outputs.storageNames
 output n8nFqdn string = n8nApp.outputs.fqdn
 output ollamaInternalFqdn string = ollamaApp.outputs.fqdn
 output qdrantInternalFqdn string = qdrantApp.outputs.fqdn
+output n8nImportJobName string = n8nImportJob.outputs.jobName
+output ollamaPullJobName string = ollamaPullJob.outputs.jobName
