@@ -134,7 +134,10 @@ resource app 'Microsoft.App/containerApps@2024-10-02-preview' = {
             { name: 'N8N_PROXY_HOPS', value: '1' }
             { name: 'N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS', value: 'false' }
             { name: 'OLLAMA_HOST', value: ollamaHost }
-            { name: 'WEBHOOK_URL', value: 'https://${name}.${reference(environmentId, '2024-10-02-preview').defaultDomain}/' }
+            {
+              name: 'WEBHOOK_URL'
+              value: 'https://${name}.${reference(environmentId, '2024-10-02-preview').defaultDomain}/'
+            }
           ]
           volumeMounts: [
             { volumeName: 'n8n-data', mountPath: '/home/node/.n8n' }
