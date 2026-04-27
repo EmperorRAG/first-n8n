@@ -15,6 +15,7 @@ on:
       - "n8n/demo-data/**"
       - ".github/workflows/infra-pr.yml"
       - ".github/workflows/infra-deploy.yml"
+      - ".github/workflows/infra-drift.yml"
       - ".github/workflows/_demo-data-upload.yml"
   workflow_dispatch:
 

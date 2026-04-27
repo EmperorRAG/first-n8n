@@ -191,6 +191,7 @@ The bootstrap layer (deploy + runtime managed identities, OIDC federated credent
 | PR to `main` touching `infra/**` or `n8n/demo-data/**` | [`infra-pr.yml`](.github/workflows/infra-pr.yml) | `az bicep build` + `az bicep lint` + `az deployment group what-if`; what-if diff posted as a sticky PR comment. **Read-only.** |
 | Push to `main` (same paths) or manual `workflow_dispatch` | [`infra-deploy.yml`](.github/workflows/infra-deploy.yml) | Bicep deploy → demo-data upload → import job (poll) → Ollama pull job (poll, ~20 min cold) → `curl /healthz` smoke. |
 | Manual demo-data refresh | [`_demo-data-upload.yml`](.github/workflows/_demo-data-upload.yml) | Standalone reusable upload (workflows or credentials). |
+| Mondays 14:00 UTC (cron) or manual | [`infra-drift.yml`](.github/workflows/infra-drift.yml) | `az deployment group what-if` against `main`; fails the run if any **Modify** or **Delete** delta exists (Azure changed out-of-band). Full diff posted as Job Summary. |
 
 All workflows authenticate via OIDC against the `id-n8n-deploy-dev` MI; no long-lived secrets.
 

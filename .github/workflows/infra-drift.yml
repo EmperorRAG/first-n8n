@@ -1,0 +1,117 @@
+name: infra-drift
+
+# Scheduled drift detection. Runs `az deployment group what-if` against
+# `main` and fails the workflow if there is any Modify or Delete delta
+# (i.e. someone changed Azure state outside Bicep). Create deltas are
+# allowed — they typically mean a new module was added since the last
+# deploy and a deploy is pending.
+#
+# Read-only against Azure. Posts a Job Summary with the full what-if
+# diff regardless of outcome. No PR commenting (no PR exists).
+
+on:
+  schedule:
+    # Mondays 14:00 UTC. Adjust if you need a different cadence.
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: infra-drift
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: rg-n8n-01-dev
+  TEMPLATE_FILE: infra/main.bicep
+  PARAMETERS_FILE: infra/main.dev.bicepparam
+  DEPLOYMENT_NAME: first-n8n-main-drift-${{ github.run_id }}
+
+jobs:
+  drift:
+    name: Detect Azure drift vs main
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: What-if
+        id: whatif
+        # `continue-on-error` so the summary + classifier always run.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          az deployment group what-if \
+            --resource-group "${RESOURCE_GROUP}" \
+            --template-file "${TEMPLATE_FILE}" \
+            --parameters "${PARAMETERS_FILE}" \
+            --name "${DEPLOYMENT_NAME}" \
+            > whatif.txt 2>&1 || echo "EXIT=$?" >> whatif.txt
+          # Strip ANSI colour codes for cleaner Markdown rendering.
+          sed -i 's/\x1b\[[0-9;]*m//g' whatif.txt
+
+      - name: Classify drift
+        id: classify
+        # Default what-if output marks each resource line with a leading
+        # symbol: `+` Create, `-` Delete, `~` Modify, `=` NoChange,
+        # `*` Ignore. Drift = any Modify or Delete (state diverged from
+        # main). Create deltas mean a Bicep change is pending deploy —
+        # surfaced but not failed.
+        run: |
+          set -euo pipefail
+          modify=$(grep -cE '^[[:space:]]*~[[:space:]]' whatif.txt || true)
+          delete=$(grep -cE '^[[:space:]]*-[[:space:]]' whatif.txt || true)
+          create=$(grep -cE '^[[:space:]]*\+[[:space:]]' whatif.txt || true)
+          echo "modify=${modify}" >> "${GITHUB_OUTPUT}"
+          echo "delete=${delete}" >> "${GITHUB_OUTPUT}"
+          echo "create=${create}" >> "${GITHUB_OUTPUT}"
+          echo "Modify=${modify} Delete=${delete} Create=${create}"
+
+      - name: Job summary
+        run: |
+          {
+            echo "## infra-drift report"
+            echo ""
+            echo "| Change type | Count |"
+            echo "|---|---|"
+            echo "| Modify (drift) | ${{ steps.classify.outputs.modify }} |"
+            echo "| Delete (drift) | ${{ steps.classify.outputs.delete }} |"
+            echo "| Create (pending deploy) | ${{ steps.classify.outputs.create }} |"
+            echo ""
+            echo "<details><summary>Full what-if output</summary>"
+            echo ""
+            echo '```'
+            # Truncate at 60k chars to stay under the GitHub summary limit (~1 MiB,
+            # but keep it readable).
+            head -c 60000 whatif.txt
+            if [ "$(wc -c < whatif.txt)" -gt 60000 ]; then
+              printf '\n\n...[truncated at 60k chars]...\n'
+            fi
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Fail on drift
+        # Drift = any Modify or Delete row. Create rows are allowed:
+        # they mean Bicep is ahead of Azure (a deploy is pending), not
+        # that Azure was changed out-of-band.
+        run: |
+          set -euo pipefail
+          modify="${{ steps.classify.outputs.modify }}"
+          delete="${{ steps.classify.outputs.delete }}"
+          if [ "${modify}" != "0" ] || [ "${delete}" != "0" ]; then
+            echo "::error::Azure drift detected: ${modify} Modify, ${delete} Delete (see Job Summary)."
+            exit 1
+          fi
+          echo "No drift."
