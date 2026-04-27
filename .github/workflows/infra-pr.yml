@@ -65,27 +65,36 @@ jobs:
 
       - name: What-if
         id: whatif
+        # Capture to a file (heredoc-to-$GITHUB_OUTPUT can break if the
+        # what-if text happens to contain a line equal to the delimiter).
+        # `continue-on-error` so the comment step still runs and surfaces
+        # the failure to the PR author instead of producing a silent red X.
+        continue-on-error: true
         run: |
           set -euo pipefail
-          {
-            echo 'whatif<<EOF'
-            az deployment group what-if \
-              --resource-group "${RESOURCE_GROUP}" \
-              --template-file "${TEMPLATE_FILE}" \
-              --parameters "${PARAMETERS_FILE}" \
-              --name "${DEPLOYMENT_NAME}" \
-              --no-pretty-print=false 2>&1 | sed -e 's/\x1b\[[0-9;]*m//g'
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
+          az deployment group what-if \
+            --resource-group "${RESOURCE_GROUP}" \
+            --template-file "${TEMPLATE_FILE}" \
+            --parameters "${PARAMETERS_FILE}" \
+            --name "${DEPLOYMENT_NAME}" \
+            --no-pretty-print=false > whatif.txt 2>&1 || echo "EXIT=$?" >> whatif.txt
+          # Strip ANSI colour codes for cleaner Markdown rendering.
+          sed -i 's/\x1b\[[0-9;]*m//g' whatif.txt
+          # Truncate at 60k chars to stay under the GitHub comment limit.
+          if [ "$(wc -c < whatif.txt)" -gt 60000 ]; then
+            head -c 60000 whatif.txt > whatif.trunc && mv whatif.trunc whatif.txt
+            printf '\n\n...[truncated at 60k chars]...\n' >> whatif.txt
+          fi
 
       - name: Post / update PR comment
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
-        env:
-          WHATIF: ${{ steps.whatif.outputs.whatif }}
         with:
           script: |
+            const fs = require('fs');
             const marker = '<!-- infra-pr:whatif -->';
+            let whatif = '(no output)';
+            try { whatif = fs.readFileSync('whatif.txt', 'utf8'); } catch (_) {}
             const body = [
               marker,
               '### Bicep what-if',
@@ -93,7 +102,7 @@ jobs:
               '<details><summary>Click to expand</summary>',
               '',
               '```',
-              process.env.WHATIF || '(no output)',
+              whatif,
               '```',
               '',
               '</details>',
