@@ -77,7 +77,7 @@ jobs:
             --template-file "${TEMPLATE_FILE}" \
             --parameters "${PARAMETERS_FILE}" \
             --name "${DEPLOYMENT_NAME}" \
-            --no-pretty-print=false > whatif.txt 2>&1 || echo "EXIT=$?" >> whatif.txt
+            > whatif.txt 2>&1 || echo "EXIT=$?" >> whatif.txt
           # Strip ANSI colour codes for cleaner Markdown rendering.
           sed -i 's/\x1b\[[0-9;]*m//g' whatif.txt
           # Truncate at 60k chars to stay under the GitHub comment limit.
