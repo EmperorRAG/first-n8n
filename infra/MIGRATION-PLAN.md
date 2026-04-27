@@ -1,8 +1,8 @@
 # Migration plan — `first-n8n` Azure side → Bicep + GitHub Actions
 
-> **Status:** plan approved decisions captured (D1–D10, Q11–Q16). Ready to start Phase 0.
+> **Status:** Phases 0–9 complete (see commits `bc336f6` and predecessors). The legacy `.azure-deploy/` scripts no longer exist in the working tree (deleted in Phase 8); references below are historical.
 > **Scope:** Azure-side IaC only. Local Docker Compose (`docker-compose.yml`, `.env.example`, `n8n/demo-data/`, `shared/`) is untouched semantically.
-> **Source-of-truth for current behaviour:** the seven scripts under [.azure-deploy/](../.azure-deploy/). They are deprecated as of this plan and deleted in Phase 8.
+> **Source-of-truth for current behaviour (historical):** the seven scripts that lived under `.azure-deploy/` until Phase 8.
 
 ---
 
