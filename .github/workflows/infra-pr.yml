@@ -37,7 +37,11 @@ jobs:
   lint-and-whatif:
     name: Bicep lint + what-if
     runs-on: ubuntu-latest
-    # No `environment:` here — pull_request OIDC subject is repo-wide.
+    # `environment: dev` is required to access environment-scoped Azure
+    # secrets. The OIDC subject becomes `environment:dev` (already
+    # federated by bootstrap.bicep). Same-repo PRs get env secrets
+    # without approval; PRs from forks would require manual approval.
+    environment: dev
     steps:
       - name: Checkout
         uses: actions/checkout@v4
