@@ -33,8 +33,8 @@ param memory string = '8.0Gi'
 @description('How long Ollama keeps models loaded in memory after the last request.')
 param keepAlive string = '30m'
 
-@description('Min replicas.')
-param minReplicas int = 0
+@description('Min replicas. Keep at 1 in dev: CAE internal ingress does not reliably activate scale-to-zero from in-env L4 connects (see ollama-pull-job notes), and Ollama is not HTTP-scaleable.')
+param minReplicas int = 1
 
 @description('Max replicas.')
 param maxReplicas int = 1

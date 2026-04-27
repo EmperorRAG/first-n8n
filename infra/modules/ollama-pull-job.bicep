@@ -76,15 +76,11 @@ resource job 'Microsoft.App/jobs@2024-10-02-preview' = {
           ]
           args: [
             '-c'
-            // The Ollama app runs with minReplicas=0 (scale-to-zero).
-            // The first request must trigger CAE cold-start, which can
-            // take 60–120s while the 8 GiB ollama image pulls and
-            // boots. Use a single long-timeout request to /api/version
-            // so envoy holds the connection through the activation
-            // window, then POST /api/pull (also with a long timeout
-            // because the model download itself runs ~10–20 min on a
-            // cold cache).
-            'echo "warming ollama (first request triggers scale-up)..."; for i in $(seq 1 5); do if curl -sS --max-time 180 http://${ollamaHost}/api/version >/dev/null; then echo "ollama is up"; break; fi; echo "warm attempt $i failed; retrying"; sleep 10; done; curl --fail-with-body -sS --max-time 1500 -X POST http://${ollamaHost}/api/pull -H "Content-Type: application/json" -d "{\\"name\\":\\"${modelName}\\",\\"stream\\":false}"'
+            // Ollama runs with minReplicas=1 so /api/version is always
+            // reachable. Briefly poll in case this job races a fresh
+            // revision rollout, then POST /api/pull (long timeout for
+            // the actual model download).
+            'for i in $(seq 1 30); do if curl -sS --max-time 10 http://${ollamaHost}/api/version >/dev/null; then echo "ollama is up"; break; fi; echo "warm attempt $i failed; retrying"; sleep 10; done; curl --fail-with-body -sS --max-time 1500 -X POST http://${ollamaHost}/api/pull -H "Content-Type: application/json" -d "{\\"name\\":\\"${modelName}\\",\\"stream\\":false}"'
           ]
           resources: {
             cpu: json(cpu)
