@@ -1,0 +1,105 @@
+name: _demo-data-upload
+
+# Reusable workflow that uploads files from the repo into an Azure Files
+# share using OIDC + the deploy managed identity. Phase 3 of the IaC
+# migration. Idempotent: `az storage file upload-batch` overwrites by
+# default.
+
+on:
+  workflow_call:
+    inputs:
+      storage-account:
+        description: Storage account hosting the file share.
+        required: true
+        type: string
+      share-name:
+        description: Target file share (e.g. n8n-demo-data).
+        required: true
+        type: string
+      source-path:
+        description: Repo-relative directory to upload from.
+        required: true
+        type: string
+      pattern:
+        description: Glob pattern for files to upload.
+        required: false
+        type: string
+        default: "*"
+      environment:
+        description: GitHub environment to bind OIDC subject to.
+        required: false
+        type: string
+        default: dev
+  workflow_dispatch:
+    inputs:
+      storage-account:
+        description: Storage account hosting the file share.
+        required: true
+        type: string
+      share-name:
+        description: Target file share.
+        required: true
+        type: string
+      source-path:
+        description: Repo-relative directory to upload from.
+        required: true
+        type: string
+      pattern:
+        description: Glob pattern for files to upload.
+        required: false
+        type: string
+        default: "*"
+      environment:
+        description: GitHub environment for OIDC.
+        required: false
+        type: string
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  upload:
+    name: Upload ${{ inputs.source-path }} → ${{ inputs.share-name }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify source directory exists
+        run: |
+          set -euo pipefail
+          if [ ! -d "${{ inputs.source-path }}" ]; then
+            echo "::error::source-path '${{ inputs.source-path }}' not found"
+            exit 1
+          fi
+          ls -la "${{ inputs.source-path }}"
+
+      - name: Upload to Azure Files
+        run: |
+          set -euo pipefail
+          az storage file upload-batch \
+            --account-name "${{ inputs.storage-account }}" \
+            --destination "${{ inputs.share-name }}" \
+            --source "${{ inputs.source-path }}" \
+            --pattern "${{ inputs.pattern }}" \
+            --auth-mode login \
+            --output table
+
+      - name: List share contents
+        run: |
+          set -euo pipefail
+          az storage file list \
+            --account-name "${{ inputs.storage-account }}" \
+            --share-name "${{ inputs.share-name }}" \
+            --auth-mode login \
+            --output table

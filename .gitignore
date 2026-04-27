@@ -1,0 +1,21 @@
+# Local environment overrides — copy from .env.example
+.env
+.env.*
+!.env.example
+
+# Generated Azure deployment secrets (legacy bash flow — pending Phase 8 deletion)
+.azure-deploy/secrets.sh
+
+# Any file marked as a secrets bundle
+*.secrets
+
+# Local-only Bicep parameter overlays (e.g. main.dev.bicepparam.local)
+*.bicepparam.local
+
+# Bicep build artefacts (compiled ARM JSON, lockfiles)
+infra/.bicep/
+infra/**/*.json
+!infra/**/*.parameters.json
+
+# Azure CLI / azd local state caches
+.azure/

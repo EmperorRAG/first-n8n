@@ -1,0 +1,126 @@
+name: infra-pr
+
+# Lint + what-if for any PR that touches infra or the demo data. Posts
+# the what-if diff as a sticky PR comment. Read-only — no Azure changes.
+#
+# OIDC subject: `repo:<owner/repo>:pull_request` (configured in
+# bootstrap.bicep). The deploy MI has Contributor on rg-n8n-01-dev plus
+# the custom CAE-storage role + Reader on the shared RG.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "infra/**"
+      - "n8n/demo-data/**"
+      - ".github/workflows/infra-pr.yml"
+      - ".github/workflows/infra-deploy.yml"
+      - ".github/workflows/_demo-data-upload.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: infra-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RESOURCE_GROUP: rg-n8n-01-dev
+  TEMPLATE_FILE: infra/main.bicep
+  PARAMETERS_FILE: infra/main.dev.bicepparam
+  DEPLOYMENT_NAME: first-n8n-main-pr-${{ github.event.pull_request.number || github.run_id }}
+
+jobs:
+  lint-and-whatif:
+    name: Bicep lint + what-if
+    runs-on: ubuntu-latest
+    # `environment: dev` is required to access environment-scoped Azure
+    # secrets. The OIDC subject becomes `environment:dev` (already
+    # federated by bootstrap.bicep). Same-repo PRs get env secrets
+    # without approval; PRs from forks would require manual approval.
+    environment: dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Bicep build (compile-time errors)
+        run: |
+          set -euo pipefail
+          az bicep build --file "${TEMPLATE_FILE}"
+
+      - name: Bicep lint
+        run: |
+          set -euo pipefail
+          az bicep lint --file "${TEMPLATE_FILE}"
+
+      - name: What-if
+        id: whatif
+        # Capture to a file (heredoc-to-$GITHUB_OUTPUT can break if the
+        # what-if text happens to contain a line equal to the delimiter).
+        # `continue-on-error` so the comment step still runs and surfaces
+        # the failure to the PR author instead of producing a silent red X.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          az deployment group what-if \
+            --resource-group "${RESOURCE_GROUP}" \
+            --template-file "${TEMPLATE_FILE}" \
+            --parameters "${PARAMETERS_FILE}" \
+            --name "${DEPLOYMENT_NAME}" \
+            > whatif.txt 2>&1 || echo "EXIT=$?" >> whatif.txt
+          # Strip ANSI colour codes for cleaner Markdown rendering.
+          sed -i 's/\x1b\[[0-9;]*m//g' whatif.txt
+          # Truncate at 60k chars to stay under the GitHub comment limit.
+          if [ "$(wc -c < whatif.txt)" -gt 60000 ]; then
+            head -c 60000 whatif.txt > whatif.trunc && mv whatif.trunc whatif.txt
+            printf '\n\n...[truncated at 60k chars]...\n' >> whatif.txt
+          fi
+
+      - name: Post / update PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- infra-pr:whatif -->';
+            let whatif = '(no output)';
+            try { whatif = fs.readFileSync('whatif.txt', 'utf8'); } catch (_) {}
+            const body = [
+              marker,
+              '### Bicep what-if',
+              '',
+              '<details><summary>Click to expand</summary>',
+              '',
+              '```',
+              whatif,
+              '```',
+              '',
+              '</details>',
+              '',
+              '> **Known what-if noise (safe to ignore):**',
+              '> - `Unsupported` rows for resources whose ID is computed via `reference()` / `listKeys()` (the storage-account RBAC assignment).',
+              '> - `Modify` on storage shares with no visible delta — ARM normalises share metadata.',
+              '> - Secret values shown as `*******` always re-resolve at deploy time; the diff is structural only.',
+              '',
+              `_Workflow: \`${context.workflow}\` · run [#${context.runNumber}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})_`,
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.find(c => c.body && c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
