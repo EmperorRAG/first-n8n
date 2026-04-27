@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "southafricanorth"
+    },
+    "workloadResourceGroupName": {
+      "value": "rg-n8n-01-dev"
+    },
+    "sharedResourceGroupName": {
+      "value": "rg-mcp-01-dev-southafricanorth"
+    },
+    "caeName": {
+      "value": "cae-mcp-01-dev-southafricanorth"
+    },
+    "deployIdentityName": {
+      "value": "id-n8n-deploy-dev"
+    },
+    "runtimeIdentityName": {
+      "value": "id-n8n-runtime-dev"
+    },
+    "keyVaultName": {
+      "value": "kv-n8n-01-dev-26070"
+    },
+    "githubRepository": {
+      "value": "EmperorRAG/first-n8n"
+    },
+    "githubEnvironment": {
+      "value": "dev"
+    }
+  }
+}
