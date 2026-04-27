@@ -14,6 +14,8 @@
 
 # Bicep build artefacts (compiled ARM JSON, lockfiles)
 infra/.bicep/
+infra/**/*.json
+!infra/**/*.parameters.json
 
 # Azure CLI / azd local state caches
 .azure/
