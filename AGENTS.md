@@ -104,6 +104,19 @@ The Coffee MCP Agent's `MCP Client Tool` node intentionally has **no** `credenti
 - **Encryptable types (Ollama, Qdrant, HTTP, etc.)**: export the credential JSON from a dev n8n instance that uses the **same** `N8N_ENCRYPTION_KEY` as `.env.example`, then drop the file into `n8n/demo-data/credentials/`. Re-import on next startup.
 - **MCP / SSE**: not supported via pre-encrypted JSON. Document the manual UI step in README.md instead.
 
+## Adding a new Azure resource (Bicep module)
+
+Azure resources live under [infra/](infra/) and are deployed via the GitHub Actions workflows in [.github/workflows/](.github/workflows/). Authoritative plan and phase status: [infra/MIGRATION-PLAN.md](infra/MIGRATION-PLAN.md).
+
+- **Where modules live:** one file per logical component under [infra/modules/](infra/modules/). Wire it into [infra/main.bicep](infra/main.bicep) — never hand-roll resources directly in `main.bicep`. Parameter values live in [infra/main.dev.bicepparam](infra/main.dev.bicepparam).
+- **AVM-first:** prefer Azure Verified Modules (`br/public:avm/...`) over hand-written `Microsoft.*` resource declarations. Only drop down to a raw resource when AVM does not cover it (current example: [infra/modules/cae-storage.bicep](infra/modules/cae-storage.bicep), where `Microsoft.App/managedEnvironments/storages` is unavailable as AVM and uses `listKeys` for the storage key).
+- **Naming:** follow the existing convention — `{type-prefix}-{workload}-{instance}-{env}` (e.g. `ca-n8n-01-dev`, `caj-ollama-pull-01-dev`, `psql-n8n-01-dev-26070`). Region suffix only for shared cross-RG resources (e.g. `cae-mcp-01-dev-southafricanorth`).
+- **Secrets:** never inline secret values. Add them to Key Vault and reference them via `keyVaultUrl` + `identity` on the Container App secret block (see [infra/modules/n8n-app.bicep](infra/modules/n8n-app.bicep) and [infra/modules/n8n-import-job.bicep](infra/modules/n8n-import-job.bicep)). The runtime MI (`id-n8n-runtime-dev`) already has `Key Vault Secrets User` on the workload KV.
+- **Cross-RG resources:** use a sub-deployment scoped to the target RG (see how `cae-storage` deploys into `rg-mcp-01-dev-southafricanorth` from `main.bicep`). The deploy MI has Reader on the shared RG plus the custom `CAE Storage Contributor` role on the CAE.
+- **What the PR workflow checks:** [`infra-pr.yml`](.github/workflows/infra-pr.yml) runs `az bicep build`, `az bicep lint`, and `az deployment group what-if` against `rg-n8n-01-dev` and posts the diff as a sticky PR comment. It is read-only — no Azure changes happen on a PR. Treat the what-if comment as the design review.
+- **What the deploy workflow does:** [`infra-deploy.yml`](.github/workflows/infra-deploy.yml) runs on push to `main` or manual dispatch: Bicep deploy → demo-data upload → import job → Ollama pull job → `/healthz` smoke. If a new module needs a post-deploy job (analogous to import or pull), add it to `infra-deploy.yml`'s job graph.
+- **Local dev impact:** none expected. The Bicep stack is Azure-only; [docker-compose.yml](docker-compose.yml) is the source of truth for local development and must keep working unchanged.
+
 ## Azure Container Apps deployment (`.azure-deploy/`)
 
 > [!WARNING]

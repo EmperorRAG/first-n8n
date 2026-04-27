@@ -164,80 +164,72 @@ Both files live under [n8n/demo-data/workflows/](n8n/demo-data/workflows) and ar
 | n8n-import | `n8n-import` | — | One-shot importer; runs to completion before `n8n` starts. |
 | ollama-pull-llama | `ollama-pull-llama` | — | One-shot model pull (`llama3.2`). |
 
-## Azure Container Apps deployment (work-in-progress)
+## Azure deployment (Bicep + GitHub Actions)
 
-> [!WARNING]
-> **The bash flow under `.azure-deploy/` is deprecated.** It is being replaced by a declarative Bicep + GitHub Actions deployment under [infra/](infra/) and [.github/workflows/](.github/workflows/). See [infra/MIGRATION-PLAN.md](infra/MIGRATION-PLAN.md) for the migration plan and phase status. The scripts below remain for reference until **Phase 8** completes; do not adopt them for new work.
-
-The [.azure-deploy/](.azure-deploy) directory contains Bash utilities that deploy the n8n side of this stack to Azure Container Apps + Azure Database for PostgreSQL Flexible Server, with shared state on Azure Files. **They are partial deployment helpers, not a one-command deploy:** they assume an ACA managed environment, Postgres Flexible Server, storage account, and a remote `coffee-mate-mcp` Container App already exist (the existing app's URL is hard-coded as `MCP_URL` in `env.sh`).
+The Azure side of this stack is deployed declaratively from [infra/](infra/) using Bicep, driven by GitHub Actions workflows under [.github/workflows/](.github/workflows/). OIDC + a user-assigned managed identity replace static service-principal secrets. See [infra/MIGRATION-PLAN.md](infra/MIGRATION-PLAN.md) for the full plan and phase status, and [infra/bootstrap.bicep](infra/bootstrap.bicep) (deployed once at subscription scope) for the one-time bootstrap of identities, federated credentials, and Key Vault.
 
 ### Target topology
 
 | Resource | Name (default) |
 |---|---|
-| ACA managed environment | `cae-mcp-01-dev-southafricanorth` (in `rg-mcp-01-dev-southafricanorth`) |
-| Resource group (n8n) | `rg-n8n-01-dev` |
+| Resource group (workload) | `rg-n8n-01-dev` |
 | Region | `southafricanorth` |
+| ACA managed environment (shared) | `cae-mcp-01-dev-southafricanorth` (in `rg-mcp-01-dev-southafricanorth`) |
 | n8n Container App | `ca-n8n-01-dev` |
 | Ollama Container App | `ca-ollama-01-dev` |
 | Qdrant Container App | `ca-qdrant-01-dev` |
 | Import job | `caj-n8n-import-01-dev` |
-| Postgres Flexible Server | `psql-n8n-01-dev-<rand>` (Burstable B1ms, PG 16) |
-| Azure Files shares | `n8n-data`, `qdrant-data`, `ollama-models`, `n8n-demo-data` |
-| Storage account | `stn8n01dev<rand>` |
+| Ollama pull job | `caj-ollama-pull-01-dev` |
+| Postgres Flexible Server | `psql-n8n-01-dev-26070` (Burstable B1ms, PG 16) |
+| Storage account | `stn8n01dev2262613750` |
+| Azure Files shares | `n8n-data`, `n8n-shared`, `qdrant-data`, `ollama-models`, `n8n-demo-data` |
+| Key Vault | `kv-n8n-01-dev-26070` |
+| Deploy MI | `id-n8n-deploy-dev` (used by GHA via OIDC) |
+| Runtime MI | `id-n8n-runtime-dev` (used by Container Apps for KV secret refs) |
 
-All identifiers and region defaults live in [.azure-deploy/env.sh](.azure-deploy/env.sh). Generated secrets (encryption key, Postgres password, randomized resource suffixes) are written to `.azure-deploy/secrets.sh`, which is gitignored.
+### One-time bootstrap
 
-### Required tooling
+The bootstrap layer (deploy + runtime managed identities, OIDC federated credentials, custom CAE-storage role, Key Vault) is deployed once at subscription scope via `az deployment sub create -l southafricanorth -f infra/bootstrap.bicep -p infra/bootstrap.dev.bicepparam`. After it runs, register the four required GitHub `dev` environment secrets (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_KEY_VAULT_NAME`) — values printed as bootstrap outputs.
 
-- `az` CLI (the workaround scripts target known quirks in `az` 2.85).
-- Bash — on Windows, use Git Bash or WSL; the YAML-patching scripts call `cygpath`.
-- Python 3 with `PyYAML` (used by `patch-volume.sh`, `patch-job-volume.sh`, `fix-job-args.sh`).
-- `openssl` (used by `01-init-secrets.sh` for key generation).
+### How to deploy
 
-### Script catalog
+| Trigger | Workflow | What runs |
+|---|---|---|
+| PR to `main` touching `infra/**` or `n8n/demo-data/**` | [`infra-pr.yml`](.github/workflows/infra-pr.yml) | `az bicep build` + `az bicep lint` + `az deployment group what-if`; what-if diff posted as a sticky PR comment. **Read-only.** |
+| Push to `main` (same paths) or manual `workflow_dispatch` | [`infra-deploy.yml`](.github/workflows/infra-deploy.yml) | Bicep deploy → demo-data upload → import job (poll) → Ollama pull job (poll, ~20 min cold) → `curl /healthz` smoke. |
+| Manual demo-data refresh | [`_demo-data-upload.yml`](.github/workflows/_demo-data-upload.yml) | Standalone reusable upload (workflows or credentials). |
 
-| Script | Purpose |
-|---|---|
-| [env.sh](.azure-deploy/env.sh) | Sources environment defaults (subscription, RG, region, app/job/share names). Sourced by every other script. Pulls in `secrets.sh` if present. |
-| [01-init-secrets.sh](.azure-deploy/01-init-secrets.sh) | Idempotently generates and persists `N8N_ENCRYPTION_KEY`, `N8N_JWT_SECRET`, `PG_PASSWORD`, `PG_SERVER`, and `STORAGE_ACCT` to `secrets.sh`. Safe to re-run. |
-| [recreate-import-job.sh](.azure-deploy/recreate-import-job.sh) | Deletes and recreates the n8n import ACA job from an inline YAML spec. Workaround for `az containerapp job update --yaml` merging (rather than replacing) list fields. |
-| [fix-job-args.sh](.azure-deploy/fix-job-args.sh) | Alternative in-place fix that rewrites the existing import job's `command`/`args` via YAML round-trip. Workaround for `az` 2.85 mis-parsing `--command`/`--args`. |
-| [patch-volume.sh](.azure-deploy/patch-volume.sh) | `patch-volume.sh APP ENVST VOL MOUNT` — idempotently mounts an Azure Files share onto an existing Container App. |
-| [patch-job-volume.sh](.azure-deploy/patch-job-volume.sh) | Same as above but for an ACA *job*. |
+All workflows authenticate via OIDC against the `id-n8n-deploy-dev` MI; no long-lived secrets.
 
-### Typical run order
+### Surviving manual steps
 
-```bash
-cd .azure-deploy
-./01-init-secrets.sh                                   # Generates secrets.sh
-./recreate-import-job.sh                               # Creates the import job
-./patch-job-volume.sh "$JOB_IMPORT" "$ENVST_DEMO" demo-data /demo-data
-./patch-volume.sh    "$APP_N8N"     "$ENVST_N8N"     n8n-data    /home/node/.n8n
-./patch-volume.sh    "$APP_QDRANT"  "$ENVST_QDRANT"  qdrant-data /qdrant/storage
-./patch-volume.sh    "$APP_OLLAMA"  "$ENVST_OLLAMA"  ollama-models /root/.ollama
-```
+The `n8n-encryption-key` is unique to each KV; once the n8n DB has credentials encrypted under one key, switching keys invalidates them. After the **first** successful deploy (and after any `n8n-encryption-key` rotation), recreate the two non-importable credentials in the n8n UI:
 
-> Provisioning the ACA managed environment, the Postgres Flexible Server, the storage account + shares, and the Container Apps themselves is **not** automated by these scripts and currently happens out of band.
+1. **Local Ollama service** (`ollamaApi`, ID `xHuYe0MDGOs9IpBW`) — Base URL: `http://ca-ollama-01-dev:11434`.
+2. **Local Qdrant Api database** (`qdrantApi`, ID `sFfERYppMeBnFNeA`) — URL: `http://ca-qdrant-01-dev:6333`.
+3. **MCP Client Tool credential** — n8n's MCP credential type cannot be pre-encrypted in JSON; configure it through the UI. Endpoint differs from local Compose:
+
+   | Environment | Endpoint |
+   |---|---|
+   | Local Compose | `http://coffee-mate-mcp:3001/sse` |
+   | Azure | `https://ca-mcp-01-dev-southafricanorth.greengrass-f377fe8c.southafricanorth.azurecontainerapps.io/mcp` (note `/mcp`, not `/sse`) |
+
+### Secrets
+
+- KV-managed (rotated via `az keyvault secret set`, picked up on next revision restart): `n8n-encryption-key`, `n8n-jwt-secret`, `pg-admin-password`.
+- GitHub-managed (the OIDC client ID + tenant + subscription IDs): set on the `dev` environment.
+- No values committed to the repo. `.env` and `.azure-deploy/secrets.sh` (legacy) are gitignored.
 
 ### Post-deployment URLs
 
-Once the n8n Container App is reachable, swap the local URLs from the [Local development](#local-development) section for the Azure equivalents.
-
-**n8n UI** — parameterized vs the concrete value currently in `.azure-deploy/secrets.sh`:
-
-| Form | URL |
+| Resource | URL |
 |---|---|
-| Parameterized | `https://<APP_N8N>.<env-default-domain>` (the `env-default-domain` is the ACA managed environment's `defaultDomain`, available from `az containerapp env show` or persisted as `N8N_FQDN` in `secrets.sh`) |
-| Concrete | `https://ca-n8n-01-dev.greengrass-f377fe8c.southafricanorth.azurecontainerapps.io` |
+| n8n UI | `https://ca-n8n-01-dev.greengrass-f377fe8c.southafricanorth.azurecontainerapps.io` |
+| Ollama (CAE-internal) | `http://ca-ollama-01-dev:11434` |
+| Qdrant (CAE-internal) | `http://ca-qdrant-01-dev:6333` |
 
-**MCP Client Tool endpoint** — differs from local in both host and path:
-
-| Environment | Endpoint |
-|---|---|
-| Local Compose | `http://coffee-mate-mcp:3001/sse` |
-| Azure (parameterized) | `${MCP_URL}` from [.azure-deploy/env.sh](.azure-deploy/env.sh) |
-| Azure (concrete) | `https://ca-mcp-01-dev-southafricanorth.greengrass-f377fe8c.southafricanorth.azurecontainerapps.io/mcp` |
+> [!NOTE]
+> The legacy bash flow under `.azure-deploy/` is **deprecated** and scheduled for deletion in **Phase 8** of the migration. Do not extend it; do not point new docs at it.
 
 ## Tips & tricks
 

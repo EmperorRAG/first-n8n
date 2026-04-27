@@ -1,0 +1,224 @@
+name: infra-deploy
+
+# Production deploy. Triggers on push to main (paths filter) and
+# manual workflow_dispatch. Runs the full chain:
+#   1. Bicep deploy of infra/main.bicep
+#   2. Reusable demo-data upload (n8n/demo-data/credentials → n8n-demo-data/credentials,
+#      n8n/demo-data/workflows → n8n-demo-data/workflows)
+#   3. Start n8n import job + poll until Succeeded
+#   4. Start Ollama model-pull job + poll until Succeeded
+#   5. Smoke: curl --fail https://${N8N_FQDN}/healthz
+#
+# OIDC subject: `repo:<owner/repo>:environment:dev` plus
+# `repo:<owner/repo>:ref:refs/heads/main` for direct push runs.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "infra/**"
+      - "n8n/demo-data/**"
+      - ".github/workflows/infra-deploy.yml"
+      - ".github/workflows/_demo-data-upload.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: infra-deploy-dev
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: rg-n8n-01-dev
+  TEMPLATE_FILE: infra/main.bicep
+  PARAMETERS_FILE: infra/main.dev.bicepparam
+  DEPLOYMENT_NAME: first-n8n-main-dev
+  STORAGE_ACCOUNT: stn8n01dev2262613750
+  IMPORT_JOB: caj-n8n-import-01-dev
+  PULL_JOB: caj-ollama-pull-01-dev
+  ENVIRONMENT: dev
+
+jobs:
+  deploy-infra:
+    name: Deploy Bicep
+    runs-on: ubuntu-latest
+    environment: dev
+    outputs:
+      n8nFqdn: ${{ steps.deploy.outputs.n8nFqdn }}
+      importJobName: ${{ steps.deploy.outputs.importJobName }}
+      pullJobName: ${{ steps.deploy.outputs.pullJobName }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy main.bicep
+        id: deploy
+        uses: azure/arm-deploy@v2
+        with:
+          scope: resourcegroup
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resourceGroupName: ${{ env.RESOURCE_GROUP }}
+          template: ${{ env.TEMPLATE_FILE }}
+          parameters: ${{ env.PARAMETERS_FILE }}
+          deploymentName: ${{ env.DEPLOYMENT_NAME }}
+          failOnStdErr: false
+
+  upload-demo-credentials:
+    name: Upload demo credentials
+    needs: deploy-infra
+    uses: ./.github/workflows/_demo-data-upload.yml
+    with:
+      storage-account: stn8n01dev2262613750
+      share-name: n8n-demo-data
+      source-path: n8n/demo-data/credentials
+      pattern: "*.json"
+      environment: dev
+    secrets: inherit
+
+  upload-demo-workflows:
+    name: Upload demo workflows
+    needs: deploy-infra
+    uses: ./.github/workflows/_demo-data-upload.yml
+    with:
+      storage-account: stn8n01dev2262613750
+      share-name: n8n-demo-data
+      source-path: n8n/demo-data/workflows
+      pattern: "*.json"
+      environment: dev
+    secrets: inherit
+
+  run-import-job:
+    name: Run n8n import job
+    needs: [ deploy-infra, upload-demo-credentials, upload-demo-workflows ]
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start + poll import job
+        run: |
+          set -euo pipefail
+          EXEC=$(az containerapp job start \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${IMPORT_JOB}" \
+            --query name -o tsv)
+          echo "execution=$EXEC"
+          for i in $(seq 1 60); do
+            STATE=$(az containerapp job execution show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${IMPORT_JOB}" \
+              --job-execution-name "$EXEC" \
+              --query properties.status -o tsv 2>/dev/null || echo "Unknown")
+            echo "$(date +%H:%M:%S) $STATE"
+            case "$STATE" in
+              Succeeded) exit 0;;
+              Failed|Degraded)
+                echo "::error::import job execution $EXEC ended in state $STATE"
+                az containerapp job logs show \
+                  --resource-group "${RESOURCE_GROUP}" \
+                  --name "${IMPORT_JOB}" \
+                  --execution "$EXEC" \
+                  --container n8n-import || true
+                exit 1
+                ;;
+            esac
+            sleep 15
+          done
+          echo "::error::import job execution $EXEC did not finish within 15 min"
+          exit 1
+
+  run-ollama-pull-job:
+    name: Run Ollama model-pull job
+    needs: [ deploy-infra, run-import-job ]
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start + poll pull job
+        run: |
+          set -euo pipefail
+          EXEC=$(az containerapp job start \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${PULL_JOB}" \
+            --query name -o tsv)
+          echo "execution=$EXEC"
+          # Cold pull of llama3.2 (~2 GB) on CPU profile can take 20+ min.
+          for i in $(seq 1 120); do
+            STATE=$(az containerapp job execution show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${PULL_JOB}" \
+              --job-execution-name "$EXEC" \
+              --query properties.status -o tsv 2>/dev/null || echo "Unknown")
+            echo "$(date +%H:%M:%S) $STATE"
+            case "$STATE" in
+              Succeeded) exit 0;;
+              Failed|Degraded)
+                echo "::error::pull job execution $EXEC ended in state $STATE"
+                az containerapp job logs show \
+                  --resource-group "${RESOURCE_GROUP}" \
+                  --name "${PULL_JOB}" \
+                  --execution "$EXEC" \
+                  --container ollama-pull || true
+                exit 1
+                ;;
+            esac
+            sleep 30
+          done
+          echo "::error::pull job execution $EXEC did not finish within 60 min"
+          exit 1
+
+  smoke-test:
+    name: Smoke test n8n /healthz
+    needs: [ deploy-infra, run-import-job ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve n8n FQDN
+        id: fqdn
+        run: |
+          set -euo pipefail
+          FQDN=$(az containerapp show \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name ca-n8n-01-dev \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "fqdn=$FQDN" >> "$GITHUB_OUTPUT"
+
+      - name: curl /healthz
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 10); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+              --max-time 15 \
+              "https://${{ steps.fqdn.outputs.fqdn }}/healthz" || echo 000)
+            echo "attempt $i: $CODE"
+            if [ "$CODE" = "200" ]; then exit 0; fi
+            sleep 15
+          done
+          echo "::error::n8n /healthz did not return 200"
+          exit 1
