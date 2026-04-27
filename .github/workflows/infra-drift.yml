@@ -79,26 +79,17 @@ jobs:
 
       - name: Classify drift
         id: classify
-        # Drift = any top-level resource with changeType `Modify` or
-        # `Delete` (state diverged from main). `Create` deltas mean a
-        # Bicep change is pending deploy — surfaced but not failed.
-        # `Ignore`, `NoChange`, `Unsupported` are not drift.
+        # See [.github/scripts/classify-drift.py](../scripts/classify-drift.py)
+        # for the noise-filtering logic and rationale. The script writes
+        # GH-Actions outputs to stdout and the list of real-Modify
+        # resource IDs to `real_modifies.txt` for the Job Summary.
         run: |
           set -euo pipefail
-          # If the JSON file is empty (CLI errored out), fall through
-          # with all-zero counts and let the Fail-on-drift step error
-          # via the existence of whatif.err.
-          if [ ! -s whatif.json ]; then
-            modify=0; delete=0; create=0
-          else
-            modify=$(jq '[.changes[]? | select(.changeType=="Modify")] | length' whatif.json)
-            delete=$(jq '[.changes[]? | select(.changeType=="Delete")] | length' whatif.json)
-            create=$(jq '[.changes[]? | select(.changeType=="Create")] | length' whatif.json)
+          python3 .github/scripts/classify-drift.py | tee -a "${GITHUB_OUTPUT}"
+          if [ -s real_modifies.txt ]; then
+            echo "Real Modify resourceIds:"
+            cat real_modifies.txt
           fi
-          echo "modify=${modify}" >> "${GITHUB_OUTPUT}"
-          echo "delete=${delete}" >> "${GITHUB_OUTPUT}"
-          echo "create=${create}" >> "${GITHUB_OUTPUT}"
-          echo "Modify=${modify} Delete=${delete} Create=${create}"
 
       - name: Job summary
         run: |
@@ -107,15 +98,22 @@ jobs:
             echo ""
             echo "| Change type | Count |"
             echo "|---|---|"
-            echo "| Modify (drift) | ${{ steps.classify.outputs.modify }} |"
+            echo "| Modify (real drift) | ${{ steps.classify.outputs.modify_real }} |"
+            echo "| Modify (known what-if noise, ignored) | $(( ${{ steps.classify.outputs.modify_total }} - ${{ steps.classify.outputs.modify_real }} )) |"
             echo "| Delete (drift) | ${{ steps.classify.outputs.delete }} |"
             echo "| Create (pending deploy) | ${{ steps.classify.outputs.create }} |"
             echo ""
+            if [ -s real_modifies.txt ]; then
+              echo "### Real Modify resource IDs"
+              echo ""
+              echo '```'
+              cat real_modifies.txt
+              echo '```'
+              echo ""
+            fi
             echo "<details><summary>Full what-if output</summary>"
             echo ""
             echo '```'
-            # Truncate at 60k chars to stay under the GitHub summary limit (~1 MiB,
-            # but keep it readable).
             head -c 60000 whatif.txt
             if [ "$(wc -c < whatif.txt)" -gt 60000 ]; then
               printf '\n\n...[truncated at 60k chars]...\n'
@@ -126,15 +124,16 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Fail on drift
-        # Drift = any Modify or Delete row. Create rows are allowed:
-        # they mean Bicep is ahead of Azure (a deploy is pending), not
-        # that Azure was changed out-of-band.
+        # Drift = any Delete row, OR any Modify row on a non-noise
+        # resource type. Create rows mean Bicep is ahead of Azure (a
+        # deploy is pending), not that Azure was changed out-of-band —
+        # surfaced in the summary but not failed.
         run: |
           set -euo pipefail
-          modify="${{ steps.classify.outputs.modify }}"
+          modify_real="${{ steps.classify.outputs.modify_real }}"
           delete="${{ steps.classify.outputs.delete }}"
-          if [ "${modify}" != "0" ] || [ "${delete}" != "0" ]; then
-            echo "::error::Azure drift detected: ${modify} Modify, ${delete} Delete (see Job Summary)."
+          if [ "${modify_real}" != "0" ] || [ "${delete}" != "0" ]; then
+            echo "::error::Azure drift detected: ${modify_real} real Modify, ${delete} Delete (see Job Summary)."
             exit 1
           fi
           echo "No drift."
