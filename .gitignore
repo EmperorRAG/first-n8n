@@ -4,6 +4,8 @@
 !.env.example
 
 # Generated Azure deployment secrets (legacy bash flow — pending Phase 8 deletion)
+# .azure-deploy/ removed in Phase 8 of the Bicep migration; keep the
+# secrets.sh ignore so any locally-resurrected copy still can't leak.
 .azure-deploy/secrets.sh
 
 # Any file marked as a secrets bundle

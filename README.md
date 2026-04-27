@@ -142,14 +142,7 @@ Both files live under [n8n/demo-data/workflows/](n8n/demo-data/workflows) and ar
 │   └── credentials/            # Pre-encrypted with the .env.example demo key
 │       ├── xHuYe0MDGOs9IpBW.json    # Local Ollama service
 │       └── sFfERYppMeBnFNeA.json    # Local Qdrant Api database
-└── .azure-deploy/              # Azure Container Apps deployment utilities (see below)
-    ├── env.sh
-    ├── 01-init-secrets.sh
-    ├── secrets.sh              # Generated, gitignored
-    ├── recreate-import-job.sh
-    ├── fix-job-args.sh
-    ├── patch-volume.sh
-    └── patch-job-volume.sh
+└── infra/                      # Azure Bicep IaC (deployed via .github/workflows/)
 ```
 
 ## Service reference
@@ -205,8 +198,8 @@ All workflows authenticate via OIDC against the `id-n8n-deploy-dev` MI; no long-
 
 The `n8n-encryption-key` is unique to each KV; once the n8n DB has credentials encrypted under one key, switching keys invalidates them. After the **first** successful deploy (and after any `n8n-encryption-key` rotation), recreate the two non-importable credentials in the n8n UI:
 
-1. **Local Ollama service** (`ollamaApi`, ID `xHuYe0MDGOs9IpBW`) — Base URL: `http://ca-ollama-01-dev:11434`.
-2. **Local Qdrant Api database** (`qdrantApi`, ID `sFfERYppMeBnFNeA`) — URL: `http://ca-qdrant-01-dev:6333`.
+1. **Local Ollama service** (`ollamaApi`, ID `xHuYe0MDGOs9IpBW`) — Base URL: `http://ca-ollama-01-dev`.
+2. **Local Qdrant Api database** (`qdrantApi`, ID `sFfERYppMeBnFNeA`) — URL: `http://ca-qdrant-01-dev`.
 3. **MCP Client Tool credential** — n8n's MCP credential type cannot be pre-encrypted in JSON; configure it through the UI. Endpoint differs from local Compose:
 
    | Environment | Endpoint |
@@ -218,18 +211,15 @@ The `n8n-encryption-key` is unique to each KV; once the n8n DB has credentials e
 
 - KV-managed (rotated via `az keyvault secret set`, picked up on next revision restart): `n8n-encryption-key`, `n8n-jwt-secret`, `pg-admin-password`.
 - GitHub-managed (the OIDC client ID + tenant + subscription IDs): set on the `dev` environment.
-- No values committed to the repo. `.env` and `.azure-deploy/secrets.sh` (legacy) are gitignored.
+- No values committed to the repo. `.env` is gitignored.
 
 ### Post-deployment URLs
 
 | Resource | URL |
 |---|---|
 | n8n UI | `https://ca-n8n-01-dev.greengrass-f377fe8c.southafricanorth.azurecontainerapps.io` |
-| Ollama (CAE-internal) | `http://ca-ollama-01-dev:11434` |
-| Qdrant (CAE-internal) | `http://ca-qdrant-01-dev:6333` |
-
-> [!NOTE]
-> The legacy bash flow under `.azure-deploy/` is **deprecated** and scheduled for deletion in **Phase 8** of the migration. Do not extend it; do not point new docs at it.
+| Ollama (CAE-internal) | `http://ca-ollama-01-dev` |
+| Qdrant (CAE-internal) | `http://ca-qdrant-01-dev` |
 
 ## Tips & tricks
 

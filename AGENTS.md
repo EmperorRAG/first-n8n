@@ -32,7 +32,7 @@ Ollama profiles: `cpu`, `gpu-nvidia`, `gpu-amd`. Mac/Apple-Silicon runs without 
 ├── n8n/demo-data/
 │   ├── workflows/              # Auto-imported on every startup
 │   └── credentials/            # Pre-encrypted with the .env.example demo key
-└── .azure-deploy/              # Bash + az CLI utilities for ACA deployment
+└── infra/                      # Azure Bicep IaC + GitHub Actions deploy workflows
 ```
 
 ## Build and Run
@@ -74,9 +74,8 @@ docker compose up --build
 
 ### Secrets and environment
 
-- `.env` and `.azure-deploy/secrets.sh` are gitignored. Never commit them.
+- `.env` is gitignored. Never commit it.
 - `.env.example` is the canonical template; keep it in sync with any new variables consumed by `docker-compose.yml`.
-- `.azure-deploy/01-init-secrets.sh` regenerates `secrets.sh` idempotently; safe to re-run.
 
 ### Shared files
 
@@ -89,7 +88,7 @@ docker compose up --build
 | `srOnR8PAY3u4RSwb` | Demo workflow | Chat Trigger → Basic LLM Chain ← Ollama Chat Model (`llama3.2:latest`) |
 | `mCpC0ffeeMateW0rk` | Coffee MCP Agent | Chat Trigger → AI Agent (typeVersion 1.7) ← Ollama Chat Model + MCP Client Tool (SSE → `coffee-mate-mcp:3001/sse` locally; `${MCP_URL}` — path `/mcp`, not `/sse` — in Azure) |
 
-The Coffee MCP Agent's `MCP Client Tool` node intentionally has **no** `credentials` block in JSON — it must be configured via the UI on first run. The SSE endpoint differs by environment: local Compose uses Docker DNS (`http://coffee-mate-mcp:3001/sse`); the Azure deployment uses `MCP_URL` from [.azure-deploy/env.sh](.azure-deploy/env.sh), which today resolves to `https://ca-mcp-01-dev-southafricanorth.greengrass-f377fe8c.southafricanorth.azurecontainerapps.io/mcp`.
+The Coffee MCP Agent's `MCP Client Tool` node intentionally has **no** `credentials` block in JSON — it must be configured via the UI on first run. The SSE endpoint differs by environment: local Compose uses Docker DNS (`http://coffee-mate-mcp:3001/sse`); the Azure deployment currently resolves to `https://ca-mcp-01-dev-southafricanorth.greengrass-f377fe8c.southafricanorth.azurecontainerapps.io/mcp` (path is `/mcp`, not `/sse`).
 
 ## How to add a new workflow
 
@@ -117,48 +116,8 @@ Azure resources live under [infra/](infra/) and are deployed via the GitHub Acti
 - **What the deploy workflow does:** [`infra-deploy.yml`](.github/workflows/infra-deploy.yml) runs on push to `main` or manual dispatch: Bicep deploy → demo-data upload → import job → Ollama pull job → `/healthz` smoke. If a new module needs a post-deploy job (analogous to import or pull), add it to `infra-deploy.yml`'s job graph.
 - **Local dev impact:** none expected. The Bicep stack is Azure-only; [docker-compose.yml](docker-compose.yml) is the source of truth for local development and must keep working unchanged.
 
-## Azure Container Apps deployment (`.azure-deploy/`)
-
-> [!WARNING]
-> **Deprecated as of the Bicep + GitHub Actions migration.** These bash scripts are scheduled for deletion in **Phase 8** of [infra/MIGRATION-PLAN.md](infra/MIGRATION-PLAN.md). New Azure deployments must go through the IaC flow under [infra/](infra/) and the workflows under [.github/workflows/](.github/workflows/). Do not extend these scripts; do not point new docs at them.
-
-These scripts are **partial deployment helpers**, not a one-command deploy. They assume an existing ACA managed environment, Postgres Flexible Server, storage account, and a remote `coffee-mate-mcp` Container App (URL hard-coded as `MCP_URL` in `env.sh`).
-
-### Prerequisites
-
-- `az` CLI (workarounds target known quirks in `az` 2.85).
-- Bash; on Windows use Git Bash or WSL — scripts call `cygpath`.
-- Python 3 with `PyYAML` (used by the YAML-patching scripts).
-- `openssl` (used by `01-init-secrets.sh`).
-
-### Script catalog
-
-| Script | Role | Notes |
-|---|---|---|
-| `env.sh` | Sources defaults | Subscription, RG (`rg-n8n-01-dev`), region (`southafricanorth`), app/job/share names, `MCP_URL`. Sources `secrets.sh` if present and derives `PG_HOST`. |
-| `01-init-secrets.sh` | Generate secrets | Writes `N8N_ENCRYPTION_KEY`, `N8N_JWT_SECRET`, `PG_PASSWORD`, `PG_SERVER`, `STORAGE_ACCT` into `secrets.sh`. Idempotent — keeps existing values. |
-| `recreate-import-job.sh` | Create import job | Deletes and recreates `caj-n8n-import-01-dev` from inline YAML. Workaround for `az containerapp job update --yaml` merging list fields instead of replacing. |
-| `fix-job-args.sh` | Patch import job | In-place fix that rewrites the existing job's `command`/`args` via YAML round-trip. Workaround for `az` 2.85 mis-parsing comma-separated `--command`/`--args`. |
-| `patch-volume.sh` | Mount Azure Files on a Container App | `patch-volume.sh APP ENVST VOL MOUNT`. Idempotent. |
-| `patch-job-volume.sh` | Mount Azure Files on a Container App job | Same shape, targets jobs. |
-| `secrets.sh` | Generated secrets | Gitignored. Created by `01-init-secrets.sh`. Never commit. |
-
-### Typical run order
-
-```bash
-cd .azure-deploy
-./01-init-secrets.sh
-./recreate-import-job.sh
-./patch-job-volume.sh "$JOB_IMPORT" "$ENVST_DEMO" demo-data /demo-data
-./patch-volume.sh    "$APP_N8N"     "$ENVST_N8N"     n8n-data    /home/node/.n8n
-./patch-volume.sh    "$APP_QDRANT"  "$ENVST_QDRANT"  qdrant-data /qdrant/storage
-./patch-volume.sh    "$APP_OLLAMA"  "$ENVST_OLLAMA"  ollama-models /root/.ollama
-```
-
-Provisioning the ACA managed environment, Postgres Flexible Server, storage account, file shares, and Container Apps themselves is **not** automated by these scripts and currently happens out of band.
-
 ## Testing changes
 
 - **Compose / workflows / credentials**: `docker compose --profile cpu config` to validate the compose file parses; `docker compose --profile cpu up --build` to verify boot, model pull, workflow import, and that the Coffee MCP Agent reaches `coffee-mate-mcp` once the credential is configured.
-- **Bash scripts**: `bash -n .azure-deploy/*.sh` for syntax; `shellcheck .azure-deploy/*.sh` if available.
+- **Bicep**: `az bicep build --file infra/main.bicep` and `az bicep lint --file infra/main.bicep` locally; the `infra-pr.yml` workflow runs both plus `what-if` on every PR.
 - There are no unit tests in this repo.
