@@ -1,0 +1,2 @@
+# Placeholder so the infra/ directory is tracked before Bicep modules land.
+# Will be removed once infra/main.bicep exists.

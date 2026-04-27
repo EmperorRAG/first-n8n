@@ -106,6 +106,9 @@ The Coffee MCP Agent's `MCP Client Tool` node intentionally has **no** `credenti
 
 ## Azure Container Apps deployment (`.azure-deploy/`)
 
+> [!WARNING]
+> **Deprecated as of the Bicep + GitHub Actions migration.** These bash scripts are scheduled for deletion in **Phase 8** of [infra/MIGRATION-PLAN.md](infra/MIGRATION-PLAN.md). New Azure deployments must go through the IaC flow under [infra/](infra/) and the workflows under [.github/workflows/](.github/workflows/). Do not extend these scripts; do not point new docs at them.
+
 These scripts are **partial deployment helpers**, not a one-command deploy. They assume an existing ACA managed environment, Postgres Flexible Server, storage account, and a remote `coffee-mate-mcp` Container App (URL hard-coded as `MCP_URL` in `env.sh`).
 
 ### Prerequisites

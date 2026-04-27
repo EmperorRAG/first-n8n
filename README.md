@@ -166,6 +166,9 @@ Both files live under [n8n/demo-data/workflows/](n8n/demo-data/workflows) and ar
 
 ## Azure Container Apps deployment (work-in-progress)
 
+> [!WARNING]
+> **The bash flow under `.azure-deploy/` is deprecated.** It is being replaced by a declarative Bicep + GitHub Actions deployment under [infra/](infra/) and [.github/workflows/](.github/workflows/). See [infra/MIGRATION-PLAN.md](infra/MIGRATION-PLAN.md) for the migration plan and phase status. The scripts below remain for reference until **Phase 8** completes; do not adopt them for new work.
+
 The [.azure-deploy/](.azure-deploy) directory contains Bash utilities that deploy the n8n side of this stack to Azure Container Apps + Azure Database for PostgreSQL Flexible Server, with shared state on Azure Files. **They are partial deployment helpers, not a one-command deploy:** they assume an ACA managed environment, Postgres Flexible Server, storage account, and a remote `coffee-mate-mcp` Container App already exist (the existing app's URL is hard-coded as `MCP_URL` in `env.sh`).
 
 ### Target topology
