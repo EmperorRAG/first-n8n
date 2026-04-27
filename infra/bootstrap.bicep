@@ -85,6 +85,10 @@ resource caeStoragesRole 'Microsoft.Authorization/roleDefinitions@2022-05-01-pre
       {
         actions: [
           'Microsoft.App/managedEnvironments/read'
+          // join/action is required for any Container App or Job in
+          // another RG to attach to this managed environment via
+          // properties.environmentId (LinkedAuthorizationFailed otherwise).
+          'Microsoft.App/managedEnvironments/join/action'
           'Microsoft.App/managedEnvironments/storages/read'
           'Microsoft.App/managedEnvironments/storages/write'
           'Microsoft.App/managedEnvironments/storages/delete'
