@@ -76,7 +76,10 @@ resource job 'Microsoft.App/jobs@2024-10-02-preview' = {
           ]
           args: [
             '-c'
-            'curl --fail-with-body -sS -X POST http://${ollamaHost}/api/pull -H "Content-Type: application/json" -d "{\\"name\\":\\"${modelName}\\",\\"stream\\":false}"'
+            // Wait up to 5 min for the Ollama server to accept connections
+            // (it may have just been redeployed by the same release), then
+            // POST /api/pull and fail on HTTP >= 400.
+            'for i in $(seq 1 60); do curl -sS --max-time 5 http://${ollamaHost}/api/version >/dev/null && break; echo "waiting for ollama ($i)"; sleep 5; done; curl --fail-with-body -sS --max-time 1500 -X POST http://${ollamaHost}/api/pull -H "Content-Type: application/json" -d "{\\"name\\":\\"${modelName}\\",\\"stream\\":false}"'
           ]
           resources: {
             cpu: json(cpu)

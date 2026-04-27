@@ -191,6 +191,7 @@ jobs:
     name: Smoke test n8n /healthz
     needs: [ deploy-infra, run-import-job ]
     runs-on: ubuntu-latest
+    environment: dev
     steps:
       - name: Azure login (OIDC)
         uses: azure/login@v2
