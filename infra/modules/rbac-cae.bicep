@@ -23,6 +23,9 @@ param deployPrincipalId string
 @description('Resource ID of the custom role definition (created at subscription scope).')
 param caeStoragesRoleDefinitionId string
 
+@description('Resource ID of the shared-RG deployments-writer custom role (created at subscription scope).')
+param sharedRgDeploymentsRoleDefinitionId string
+
 // Built-in role definition IDs (constants).
 var readerRoleDefinitionId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
@@ -43,6 +46,16 @@ resource readerOnRg 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
+resource deploymentsWriterOnRg 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, deployPrincipalId, sharedRgDeploymentsRoleDefinitionId)
+  properties: {
+    roleDefinitionId: sharedRgDeploymentsRoleDefinitionId
+    principalId: deployPrincipalId
+    principalType: 'ServicePrincipal'
+    description: 'first-n8n deploy MI: write ARM sub-deployments in shared RG (cross-RG nested deploy shell).'
+  }
+}
+
 resource caeStoragesOnCae 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: cae
   name: guid(cae.id, deployPrincipalId, caeStoragesRoleDefinitionId)
@@ -55,4 +68,5 @@ resource caeStoragesOnCae 'Microsoft.Authorization/roleAssignments@2022-04-01' =
 }
 
 output readerAssignmentId string = readerOnRg.id
+output deploymentsWriterAssignmentId string = deploymentsWriterOnRg.id
 output caeStoragesAssignmentId string = caeStoragesOnCae.id

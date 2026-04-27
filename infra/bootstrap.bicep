@@ -97,6 +97,39 @@ resource caeStoragesRole 'Microsoft.Authorization/roleDefinitions@2022-05-01-pre
   }
 }
 
+// Narrow role: create/read sub-deployments in the shared RG. Required so
+// the deploy MI can run the cross-RG nested deployment that wires the
+// CAE env-storage definitions. ARM enforces this at the RG scope of the
+// nested deployment shell, separately from the action permissions on the
+// resources inside it (which the CAE Env-Storages Manager role grants).
+resource sharedRgDeploymentsRole 'Microsoft.Authorization/roleDefinitions@2022-05-01-preview' = {
+  name: guid(subscription().id, 'first-n8n-shared-rg-deployments-writer', sharedRgId)
+  properties: {
+    roleName: 'first-n8n Shared-RG Deployments Writer (${githubEnvironment})'
+    description: 'Create/read ARM sub-deployments in the shared RG. Created by first-n8n bootstrap.'
+    type: 'CustomRole'
+    assignableScopes: [
+      sharedRgId
+    ]
+    permissions: [
+      {
+        actions: [
+          'Microsoft.Resources/deployments/read'
+          'Microsoft.Resources/deployments/write'
+          'Microsoft.Resources/deployments/validate/action'
+          'Microsoft.Resources/deployments/whatIf/action'
+          'Microsoft.Resources/deployments/operations/read'
+          'Microsoft.Resources/deployments/operationStatuses/read'
+          'Microsoft.Resources/deployments/cancel/action'
+        ]
+        notActions: []
+        dataActions: []
+        notDataActions: []
+      }
+    ]
+  }
+}
+
 // ----- Workload-RG nested deployment ------------------------------------
 
 module workload 'modules/workload-bootstrap.bicep' = {
@@ -121,6 +154,7 @@ module sharedRgRbac 'modules/rbac-cae.bicep' = {
     caeName: caeName
     deployPrincipalId: workload.outputs.deployIdentityPrincipalId
     caeStoragesRoleDefinitionId: caeStoragesRole.id
+    sharedRgDeploymentsRoleDefinitionId: sharedRgDeploymentsRole.id
   }
 }
 
