@@ -45,8 +45,12 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: What-if
-        id: whatif
+      - name: What-if (JSON for classification)
+        id: whatif_json
+        # `--no-pretty-print` returns unformatted JSON containing the
+        # canonical `changeType` per top-level resource. Parsing this is
+        # much more reliable than grepping the human-readable diff
+        # (which also marks nested property changes with `~`/`-`).
         # `continue-on-error` so the summary + classifier always run.
         continue-on-error: true
         run: |
@@ -56,22 +60,41 @@ jobs:
             --template-file "${TEMPLATE_FILE}" \
             --parameters "${PARAMETERS_FILE}" \
             --name "${DEPLOYMENT_NAME}" \
+            --no-pretty-print \
+            > whatif.json 2> whatif.err || echo "EXIT=$?" >> whatif.err
+
+      - name: What-if (pretty for Job Summary)
+        id: whatif_pretty
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          az deployment group what-if \
+            --resource-group "${RESOURCE_GROUP}" \
+            --template-file "${TEMPLATE_FILE}" \
+            --parameters "${PARAMETERS_FILE}" \
+            --name "${DEPLOYMENT_NAME}-pretty" \
             > whatif.txt 2>&1 || echo "EXIT=$?" >> whatif.txt
           # Strip ANSI colour codes for cleaner Markdown rendering.
           sed -i 's/\x1b\[[0-9;]*m//g' whatif.txt
 
       - name: Classify drift
         id: classify
-        # Default what-if output marks each resource line with a leading
-        # symbol: `+` Create, `-` Delete, `~` Modify, `=` NoChange,
-        # `*` Ignore. Drift = any Modify or Delete (state diverged from
-        # main). Create deltas mean a Bicep change is pending deploy —
-        # surfaced but not failed.
+        # Drift = any top-level resource with changeType `Modify` or
+        # `Delete` (state diverged from main). `Create` deltas mean a
+        # Bicep change is pending deploy — surfaced but not failed.
+        # `Ignore`, `NoChange`, `Unsupported` are not drift.
         run: |
           set -euo pipefail
-          modify=$(grep -cE '^[[:space:]]*~[[:space:]]' whatif.txt || true)
-          delete=$(grep -cE '^[[:space:]]*-[[:space:]]' whatif.txt || true)
-          create=$(grep -cE '^[[:space:]]*\+[[:space:]]' whatif.txt || true)
+          # If the JSON file is empty (CLI errored out), fall through
+          # with all-zero counts and let the Fail-on-drift step error
+          # via the existence of whatif.err.
+          if [ ! -s whatif.json ]; then
+            modify=0; delete=0; create=0
+          else
+            modify=$(jq '[.changes[]? | select(.changeType=="Modify")] | length' whatif.json)
+            delete=$(jq '[.changes[]? | select(.changeType=="Delete")] | length' whatif.json)
+            create=$(jq '[.changes[]? | select(.changeType=="Create")] | length' whatif.json)
+          fi
           echo "modify=${modify}" >> "${GITHUB_OUTPUT}"
           echo "delete=${delete}" >> "${GITHUB_OUTPUT}"
           echo "create=${create}" >> "${GITHUB_OUTPUT}"
