@@ -46,8 +46,8 @@ resource app 'Microsoft.App/containerApps@2024-10-02-preview' = {
       ingress: {
         external: false
         targetPort: 6333
-        transport: 'auto'
-        allowInsecure: false
+        transport: 'http'
+        allowInsecure: true
         traffic: [
           {
             latestRevision: true
