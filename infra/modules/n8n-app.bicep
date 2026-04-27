@@ -49,7 +49,7 @@ param postgresUser string = 'n8nadmin'
 param postgresPort int = 5432
 
 @description('Internal Ollama host:port reachable from this app.')
-param ollamaHost string = 'ca-ollama-01-dev:11434'
+param ollamaHost string = 'ca-ollama-01-dev'
 
 @description('CPU cores.')
 param cpu string = '1.0'

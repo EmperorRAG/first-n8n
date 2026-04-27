@@ -32,8 +32,8 @@ param environmentId string
 @description('Container image. `curlimages/curl` is ~5 MiB and ships only curl.')
 param image string = 'curlimages/curl:latest'
 
-@description('Internal Ollama host:port reachable from this job (CAE-internal).')
-param ollamaHost string = 'ca-ollama-01-dev:11434'
+@description('Internal Ollama host reachable from this job (CAE-internal). Do NOT include the targetPort (11434) — for HTTP ingress, in-env callers hit the envoy on port 80, not the container targetPort.')
+param ollamaHost string = 'ca-ollama-01-dev'
 
 @description('Model name to pull (Ollama registry tag).')
 param modelName string = 'llama3.2'

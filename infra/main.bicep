@@ -163,7 +163,7 @@ module n8nApp 'modules/n8n-app.bicep' = {
     postgresFqdn: postgres.outputs.fqdn
     postgresDatabase: postgres.outputs.databaseName
     postgresUser: postgres.outputs.adminLogin
-    ollamaHost: '${ollamaAppName}:11434'
+    ollamaHost: ollamaAppName
   }
   dependsOn: [
     caeStorage
@@ -200,7 +200,7 @@ module ollamaPullJob 'modules/ollama-pull-job.bicep' = {
     location: location
     tags: tags
     environmentId: cae.id
-    ollamaHost: '${ollamaAppName}:11434'
+    ollamaHost: ollamaAppName
     modelName: ollamaModelName
   }
   dependsOn: [
